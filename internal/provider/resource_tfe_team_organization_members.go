@@ -88,7 +88,10 @@ func resourceTFETeamOrganizationMembersRead(d *schema.ResourceData, meta interfa
 	// Get all organization memberships and add them to object
 	var organizationMembershipIDs []interface{}
 	for _, membership := range organizationMemberships {
-		organizationMembershipIDs = append(organizationMembershipIDs, membership.ID)
+		// Service accounts should not be managed by this resource
+		if !membership.User.IsServiceAccount {
+			organizationMembershipIDs = append(organizationMembershipIDs, membership.ID)
+		}
 	}
 
 	// Check if organization memberships were added at all
@@ -111,7 +114,10 @@ func fetchExistingTeamMembershipIds(config *tfe.Client, teamID string) (map[stri
 
 	teamMembersIDSet := make(map[string]interface{})
 	for _, m := range teamMembers {
-		teamMembersIDSet[m.ID] = nil
+		// Service accounts should not be managed by this resource
+		if !m.User.IsServiceAccount {
+			teamMembersIDSet[m.ID] = nil
+		}
 	}
 
 	return teamMembersIDSet, nil
@@ -199,8 +205,11 @@ func resourceTFETeamOrganizationMembersDelete(d *schema.ResourceData, meta inter
 	options := tfe.TeamMemberRemoveOptions{}
 
 	// Add all the users that need to be removed.
-	for _, memberships := range organizationMemberships {
-		options.OrganizationMembershipIDs = append(options.OrganizationMembershipIDs, memberships.ID)
+	for _, m := range organizationMemberships {
+		// Service accounts should not be managed by this resource
+		if !m.User.IsServiceAccount {
+			options.OrganizationMembershipIDs = append(options.OrganizationMembershipIDs, m.ID)
+		}
 	}
 
 	log.Printf("[DEBUG] Remove organization memberships %v from team: %s", options.OrganizationMembershipIDs, d.Id())

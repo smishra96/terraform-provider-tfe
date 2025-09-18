@@ -88,7 +88,8 @@ func resourceTFETeamOrganizationMemberRead(d *schema.ResourceData, meta interfac
 
 	found := false
 	for _, organizationMembership := range organizationMemberships {
-		if organizationMembership.ID == organizationMembershipID {
+		// Service accounts should not be managed by this resource
+		if !organizationMembership.User.IsServiceAccount && organizationMembership.ID == organizationMembershipID {
 			d.Set("team_id", teamID)
 			d.Set("organization_membership_id", organizationMembershipID)
 
