@@ -86,20 +86,9 @@ func resourceTFETeamOrganizationMembersRead(d *schema.ResourceData, meta interfa
 	}
 
 	log.Printf("[DEBUG] Read users from team: %s", d.Id())
-	users, err := config.Client.TeamMembers.ListUsers(ctx, d.Id())
+	nonServiceAccountUsers, err := fetchNonServiceAccountUserIds(config.Client, d.Id())
 	if err != nil {
-		if errors.Is(err, tfe.ErrResourceNotFound) {
-			log.Printf("[DEBUG] Users for team %s no longer exist", d.Id())
-			return nil
-		}
 		return fmt.Errorf("Error reading users from team %s: %w", d.Id(), err)
-	}
-
-	nonServiceAccountUsers := make(map[string]interface{})
-	for _, user := range users {
-		if !user.IsServiceAccount {
-			nonServiceAccountUsers[user.ID] = nil
-		}
 	}
 
 	// Get all organization memberships and add them to object
@@ -123,16 +112,37 @@ func resourceTFETeamOrganizationMembersRead(d *schema.ResourceData, meta interfa
 	return nil
 }
 
+func fetchNonServiceAccountUserIds(config *tfe.Client, teamID string) (map[string]interface{}, error) {
+	users, err := config.TeamMembers.ListUsers(ctx, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch existing users for team %s: %w", teamID, err)
+	}
+
+	nonServiceAccountUserIDSet := make(map[string]interface{})
+	for _, u := range users {
+		if !u.IsServiceAccount {
+			nonServiceAccountUserIDSet[u.ID] = nil
+		}
+	}
+
+	return nonServiceAccountUserIDSet, nil
+}
+
 func fetchExistingTeamMembershipIds(config *tfe.Client, teamID string) (map[string]interface{}, error) {
 	teamMembers, err := config.TeamMembers.ListOrganizationMemberships(ctx, teamID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch existing organization memberships for team %s: %w", teamID, err)
 	}
 
+	nonServiceAccountUserIds, err := fetchNonServiceAccountUserIds(config, teamID)
+	if err != nil {
+		return nil, err
+	}
+
 	teamMembersIDSet := make(map[string]interface{})
 	for _, m := range teamMembers {
 		// Service accounts should not be managed by this resource
-		if !m.User.IsServiceAccount {
+		if _, ok := nonServiceAccountUserIds[m.User.ID]; ok {
 			teamMembersIDSet[m.ID] = nil
 		}
 	}
@@ -218,13 +228,18 @@ func resourceTFETeamOrganizationMembersDelete(d *schema.ResourceData, meta inter
 		return fmt.Errorf("Error reading organization memberships from team %s: %w", d.Id(), err)
 	}
 
+	nonServiceAccountUserIds, err := fetchNonServiceAccountUserIds(config.Client, d.Id())
+	if err != nil {
+		return fmt.Errorf("Error fetching account user IDs for team %s: %w", d.Id(), err)
+	}
+
 	// Create a new options struct.
 	options := tfe.TeamMemberRemoveOptions{}
 
 	// Add all the users that need to be removed.
 	for _, m := range organizationMemberships {
 		// Service accounts should not be managed by this resource
-		if !m.User.IsServiceAccount {
+		if _, ok := nonServiceAccountUserIds[m.User.ID]; ok {
 			options.OrganizationMembershipIDs = append(options.OrganizationMembershipIDs, m.ID)
 		}
 	}
