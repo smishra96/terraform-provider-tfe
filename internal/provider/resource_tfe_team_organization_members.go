@@ -85,11 +85,28 @@ func resourceTFETeamOrganizationMembersRead(d *schema.ResourceData, meta interfa
 		return fmt.Errorf("Error reading organization memberships from team %s: %w", d.Id(), err)
 	}
 
+	log.Printf("[DEBUG] Read users from team: %s", d.Id())
+	users, err := config.Client.TeamMembers.ListUsers(ctx, d.Id())
+	if err != nil {
+		if errors.Is(err, tfe.ErrResourceNotFound) {
+			log.Printf("[DEBUG] Users for team %s no longer exist", d.Id())
+			return nil
+		}
+		return fmt.Errorf("Error reading users from team %s: %w", d.Id(), err)
+	}
+
+	nonServiceAccountUsers := make(map[string]interface{})
+	for _, user := range users {
+		if !user.IsServiceAccount {
+			nonServiceAccountUsers[user.ID] = nil
+		}
+	}
+
 	// Get all organization memberships and add them to object
 	var organizationMembershipIDs []interface{}
 	for _, membership := range organizationMemberships {
 		// Service accounts should not be managed by this resource
-		if !membership.User.IsServiceAccount {
+		if _, ok := nonServiceAccountUsers[membership.User.ID]; ok {
 			organizationMembershipIDs = append(organizationMembershipIDs, membership.ID)
 		}
 	}
